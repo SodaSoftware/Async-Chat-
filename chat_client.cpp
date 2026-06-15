@@ -402,7 +402,13 @@ void TLS_HandShake(boost::asio::ip::tcp::socket &sock, SecByteBlock &key)
 
 }
 
-
+void while_poll(boost::asio::io_context &io)
+{
+        while(true)
+        {
+            io.poll();
+        }
+}
 
 int main()
 {
@@ -464,12 +470,11 @@ int main()
 
         check_msg(sock, seance_key);
         
-
-        while(true)
-        {
-            io.poll();
-        }
-
+        std::thread while_poll_thread(while_poll, std::ref(io));
+        
+        write.join();
+        read_th.join();
+        while_poll_thread.join();
     }
     else
     {

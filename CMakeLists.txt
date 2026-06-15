@@ -4,6 +4,11 @@ project(AsyncChatWithDB)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
 include_directories(/usr/include)
 
 # СЕРВЕР
@@ -22,3 +27,4 @@ target_link_libraries(chat_client PRIVATE
     cryptopp 
     pthread
 )
+target_link_libraries(chat_client PRIVATE Qt6::Widgets)

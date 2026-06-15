@@ -238,7 +238,7 @@ class ChatServer
 
 boost::asio::io_context io;
 boost::asio::steady_timer timer(io);
-
+std::mutex write_read_mtx;
 
 
 
@@ -318,8 +318,20 @@ std::optional<std::string> get_address(std::string name, ChatServer &server)
         //std::cout << users[i].second << ":" << users[i].second.length() << " username : " << name << ":" << name.length() << "correct name\n" << (users[i].second == name) << "-\n";
         if ((*it)->get_name() == name)
         {
-            std::cout << "Correct\n";
-            return (*it)->get_sock()->remote_endpoint().address().to_string();
+            
+            
+            boost::system::error_code ec;
+            std::string address = (*it)->get_sock()->remote_endpoint(ec).address().to_string();
+
+            if(!ec)
+            {
+                std::cout << "Correct\n";
+                return address;
+            }
+            else{
+                std::cout << "[ERROR] " << ec.message() << "\n";
+                return std::nullopt;
+            }
         }
         else
         {
@@ -335,11 +347,16 @@ auto get_sock(std::string address, ChatServer &server)
     for (auto client_it = server.sockets.begin(); client_it != server.sockets.end(); client_it++)
     {
         std::cout << "Check Sock\n";
-        std::cout << (*client_it)->get_sock()->remote_endpoint().address().to_string() << ":" << address << "\n";
-        if ((*client_it)->get_sock()->remote_endpoint().address().to_string() == address)
+        boost::system::error_code ec;
+        std::cout << (*client_it)->get_sock()->remote_endpoint(ec).address().to_string() << ":" << address << "\n";
+        if ((*client_it)->get_sock()->remote_endpoint(ec).address().to_string() == address)
         {
             std::cout << "Correct\n";
             return client_it;
+        }
+        if (ec)
+        {
+            std::cout << "[WARNING] Client disconect\n";
         }
     } 
 
@@ -469,16 +486,27 @@ void check_massages(std::shared_ptr<Client> sock1, ChatServer &server)
 
             Message full_message(name.value(), msg.value(), sock1->get_name());
             full_message.print();
-            server.queue_msg.push_back(full_message);
+
+            {
+                std::lock_guard<std::mutex> lock(write_read_mtx);
+                server.queue_msg.push_back(full_message);
+            }
+            
 
             check_massages(sock1, server);
-            }
+        }
             else if(error == boost::asio::error::eof)
             {
                 sock1->get_sock()->close();
                 server.sockets.remove(sock1);
                 std::cout << "Socket delete\n";
             }
+        }
+        else if(error)
+        {
+            sock1->get_sock()->close();
+            server.sockets.remove(sock1);
+            std::cout << "[ERROR] Socket delete: " << error.message() << std::endl;
         }
     });
     
@@ -648,9 +676,10 @@ std::string make_msg(std::string msg, SecByteBlock msg_key)
 void write_sock(boost::system::error_code er, ChatServer &server)
 {
     std::cout << "Start queue check\n";
+    
     for(auto i = server.queue_msg.begin(); i != server.queue_msg.end();)
     {
-        std::cout << "Check msg\n";
+        std::cout << "Check msg " << i->get_sink_name() << "\n";
         auto address = get_address(i->get_sink_name(), server);
         
         if(address)
@@ -662,7 +691,12 @@ void write_sock(boost::system::error_code er, ChatServer &server)
                 std::string msg(i->get_source_name()+":"+i->get_msg());
                 (*ind)->get_sock()->write_some(boost::asio::buffer(make_msg(msg, (*ind)->get_key())));
                 std::cout << "Msg sent to " << i->get_sink_name() << "\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                {
+                std::lock_guard<std::mutex> lock(write_read_mtx);
                 i = server.queue_msg.erase(i);
+                }
                 
             }
             else{
@@ -673,6 +707,7 @@ void write_sock(boost::system::error_code er, ChatServer &server)
             i++;
         }
     }
+    
     timer.expires_at(timer.expiry() + boost::asio::chrono::milliseconds(1500));
     timer.async_wait([&server](const boost::system::error_code& ec) {
     write_sock(ec, server);
